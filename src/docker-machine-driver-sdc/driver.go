@@ -26,6 +26,13 @@ var (
 	defaultSdcKeyId   = ""
 	defaultSdcUrl     = "https://us-east-1.api.joyent.com"
 
+	// "debian-8/20150702"
+	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8-20150702
+	defaultSdcImage = "2f56d126-20d0-11e5-9e5b-5f3ef6688aba"
+
+	// "g3-standard-0.25-kvm"
+	defaultSdcPackage = "f13b10ca-1a63-4903-b29e-8615ea3858a6"
+
 	errUnimplemented = errors.New("UNIMPLEMENTED")
 )
 
@@ -51,16 +58,16 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.SetSwarmConfigFromFlags(opts)
 
 	if d.SdcAccount == "" {
-		return fmt.Errorf("%s driver requires the %s-account option", driverName, driverName)
+		return fmt.Errorf("%s driver requires the --%s-account/SDC_ACCOUNT option", driverName, driverName)
 	}
 	if d.SdcKeyFile == "" {
-		return fmt.Errorf("%s driver requires the %s-key-file option", driverName, driverName)
+		return fmt.Errorf("%s driver requires the --%s-key-file/SDC_KEY_FILE option", driverName, driverName)
 	}
 	if d.SdcKeyId == "" {
-		return fmt.Errorf("%s driver requires the %s-key-id option", driverName, driverName)
+		return fmt.Errorf("%s driver requires the --%s-key-id/SDC_KEY_ID option", driverName, driverName)
 	}
 	if d.SdcUrl == "" {
-		return fmt.Errorf("%s driver requires the %s-url option", driverName, driverName)
+		return fmt.Errorf("%s driver requires the --%s-url/SDC_URL option", driverName, driverName)
 	}
 
 	return nil
@@ -119,6 +126,21 @@ func (d Driver) client() (*cloudapi.Client, error) {
 		log.New(os.Stderr, "", log.LstdFlags),
 	)), nil
 }
+func (d *Driver) getMachine() (*cloudapi.Machine, error) {
+	client, err := d.client()
+	if err != nil {
+		return nil, err
+	}
+	machine, err := client.GetMachine(d.SdcMachineId)
+	if err != nil {
+		return nil, err
+	}
+
+	// update d.IPAddress since we know the value (saves later work)
+	d.IPAddress = machine.PrimaryIP
+
+	return machine, nil
+}
 
 func NewDriver(hostName, storePath string) Driver {
 	return Driver{
@@ -147,8 +169,9 @@ func (d *Driver) Create() error {
 	machine, err := client.CreateMachine(cloudapi.CreateMachineOpts{
 		Name: d.MachineName,
 
-		//Package: "", // TODO
-		//Image:   "", // TODO
+		// TODO configurable in some way
+		Image:   defaultSdcImage,
+		Package: defaultSdcPackage,
 	})
 	if err != nil {
 		return err
@@ -164,44 +187,105 @@ func (d *Driver) DriverName() string {
 	return driverName
 }
 
-// GetSSHUsername returns username for use with ssh
+// GetIP returns an IP or hostname that this host is available at
+// e.g. 1.2.3.4 or docker-host-d60b70a14d3a.cloudapp.net
+func (d *Driver) GetIP() (string, error) {
+	if d.IPAddress != "" {
+		return d.IPAddress, nil
+	}
+	machine, err := d.getMachine()
+	if err != nil {
+		return "", err
+	}
+	return machine.PrimaryIP, nil
+}
+
+// GetSSHHostname returns hostname for use with ssh
 func (d *Driver) GetSSHHostname() (string, error) {
-	return "", errUnimplemented
+	return d.GetIP()
 }
 
 // GetURL returns a Docker compatible host URL for connecting to this host
 // e.g. tcp://1.2.3.4:2376
 func (d *Driver) GetURL() (string, error) {
-	return "", errUnimplemented
+	ip, err := d.GetIP()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("tcp://%s:2376", ip), nil
+}
+
+func (d *Driver) GetSSHKeyPath() string {
+	// TODO remove this and somehow install the key provided by docker-machine into the VM
+	return d.SdcKeyFile
 }
 
 // GetState returns the state that the host is in (running, stopped, etc)
 func (d *Driver) GetState() (state.State, error) {
 	// https://github.com/docker/machine/blob/v0.7.0/libmachine/state/state.go
-	return state.None, errUnimplemented
+
+	machine, err := d.getMachine()
+	if err != nil {
+		return state.Error, err
+	}
+
+	// https://github.com/joyent/smartos-live/blob/master/src/vm/man/vmadm.1m.md#vm-states
+	switch machine.State {
+	case "configured":
+		return state.Starting, nil
+	case "installed":
+		return state.Starting, nil
+	case "ready":
+		return state.Starting, nil
+	case "running":
+		return state.Running, nil
+	case "shutting_down":
+		return state.Stopping, nil
+	case "down":
+		return state.Stopped, nil
+	}
+
+	return state.Error, fmt.Errorf("unknown SDC machine state: %s", machine.State)
 }
 
 // Kill stops a host forcefully
 func (d *Driver) Kill() error {
-	return errUnimplemented
+	client, err := d.client()
+	if err != nil {
+		return err
+	}
+	return client.StopMachine(d.SdcMachineId)
 }
 
 // Remove a host
 func (d *Driver) Remove() error {
-	return errUnimplemented
+	client, err := d.client()
+	if err != nil {
+		return err
+	}
+	return client.DeleteMachine(d.SdcMachineId)
 }
 
 // Restart a host. This may just call Stop(); Start() if the provider does not have any special restart behaviour.
 func (d *Driver) Restart() error {
-	return errUnimplemented
+	client, err := d.client()
+	if err != nil {
+		return err
+	}
+	return client.RebootMachine(d.SdcMachineId)
 }
 
 // Start a host
 func (d *Driver) Start() error {
-	return errUnimplemented
+	client, err := d.client()
+	if err != nil {
+		return err
+	}
+	return client.StartMachine(d.SdcMachineId)
 }
 
 // Stop a host gracefully
 func (d *Driver) Stop() error {
+	// TODO
 	return errUnimplemented
 }
