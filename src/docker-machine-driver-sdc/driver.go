@@ -213,6 +213,24 @@ func (d *Driver) Create() error {
 	return nil
 }
 
+// PreCreateCheck allows for pre-create operations to make sure a driver is ready for creation
+func (d *Driver) PreCreateCheck() error {
+	client, err := d.client()
+	if err != nil {
+		return err
+	}
+
+	// TODO find a better "Ping" method
+	_, err = client.CountMachines()
+	if err != nil {
+		return err
+	}
+
+	// TODO verify d.SdcImage and d.SdcPackage (including resolving names to UUIDs)
+
+	return nil
+}
+
 // DriverName returns the name of the driver
 func (d *Driver) DriverName() string {
 	return driverName
@@ -252,7 +270,6 @@ func (d *Driver) GetURL() (string, error) {
 }
 
 func (d *Driver) GetSSHKeyPath() string {
-	// TODO remove this and somehow install the key provided by docker-machine into the VM
 	return d.SdcKeyFile
 }
 
