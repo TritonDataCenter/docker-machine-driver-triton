@@ -18,24 +18,28 @@ import (
 
 const (
 	driverName = "sdc"
-
-	defaultSdcAccount = ""
-	defaultSdcKeyFile = ""
-	defaultSdcKeyId   = ""
-	defaultSdcUrl     = "https://us-east-1.api.joyent.com"
 )
 
 var (
+	defaultSdcAccount = ""
+	defaultSdcKeyFile = os.Getenv("HOME") + "/.ssh/id_rsa"
+	defaultSdcKeyId   = ""
+	defaultSdcUrl     = "https://us-east-1.api.joyent.com"
+
 	errUnimplemented = errors.New("UNIMPLEMENTED")
 )
 
 type Driver struct {
 	*drivers.BaseDriver
 
+	// authentication/access parameters
 	SdcAccount string
 	SdcKeyFile string
 	SdcKeyId   string
 	SdcUrl     string
+
+	// machine state
+	SdcMachineId string
 }
 
 // SetConfigFromFlags configures the driver with the object that was returned by RegisterCreateFlags
@@ -80,13 +84,13 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		mcnflag.StringFlag{
 			EnvVar: "SDC_KEY_ID",
 			Name:   driverName + "-key-id",
-			Usage:  "The fingerprint of $SDC_KEY_FILE (ssh-keygen -l -f $SDC_KEY_FILE | awk '{ print $2 }')",
+			Usage:  `The fingerprint of $SDC_KEY_FILE (ssh-keygen -l -E md5 -f $SDC_KEY_FILE | awk '{ gsub(/^[^:]+:/, "", $2); print $2 }')`,
 			Value:  defaultSdcKeyId,
 		},
 		mcnflag.StringFlag{
 			EnvVar: "SDC_KEY_FILE",
 			Name:   driverName + "-key-file",
-			Usage:  "An SSH public key file that has been added to $SDC_ACCOUNT",
+			Usage:  "An SSH private key file that has been added to $SDC_ACCOUNT",
 			Value:  defaultSdcKeyFile,
 		},
 	}
@@ -135,7 +139,24 @@ func NewDriver(hostName, storePath string) Driver {
 
 // Create a host using the driver's config
 func (d *Driver) Create() error {
-	return errUnimplemented
+	client, err := d.client()
+	if err != nil {
+		return err
+	}
+
+	machine, err := client.CreateMachine(cloudapi.CreateMachineOpts{
+		Name: d.MachineName,
+
+		//Package: "", // TODO
+		//Image:   "", // TODO
+	})
+	if err != nil {
+		return err
+	}
+
+	d.SdcMachineId = machine.Id
+
+	return nil
 }
 
 // DriverName returns the name of the driver
