@@ -35,8 +35,6 @@ var (
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
 	defaultTritonImage   = "debian-8"
 	defaultTritonPackage = "g3-standard-0.25-kvm"
-
-	errUnimplemented = errors.New("UNIMPLEMENTED")
 )
 
 type Driver struct {
