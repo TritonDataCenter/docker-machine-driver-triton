@@ -29,7 +29,7 @@ const (
 
 var (
 	defaultTritonAccount = ""
-	defaultTritonKeyFile = os.Getenv("HOME") + "/.ssh/id_rsa"
+	defaultTritonKeyPath = os.Getenv("HOME") + "/.ssh/id_rsa"
 	defaultTritonKeyId   = ""
 	defaultTritonUrl     = "https://us-east-1.api.joyent.com"
 
@@ -43,7 +43,7 @@ type Driver struct {
 
 	// authentication/access parameters
 	TritonAccount string
-	TritonKeyFile string
+	TritonKeyPath string
 	TritonKeyId   string
 	TritonUrl     string
 
@@ -58,7 +58,7 @@ type Driver struct {
 // SetConfigFromFlags configures the driver with the object that was returned by RegisterCreateFlags
 func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.TritonAccount = opts.String(flagPrefix + "account")
-	d.TritonKeyFile = opts.String(flagPrefix + "key-file")
+	d.TritonKeyPath = opts.String(flagPrefix + "key-file")
 	d.TritonKeyId = opts.String(flagPrefix + "key-id")
 	d.TritonUrl = opts.String(flagPrefix + "url")
 
@@ -70,8 +70,8 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	if d.TritonAccount == "" {
 		return fmt.Errorf("%s driver requires the --%saccount/%sACCOUNT option", driverName, flagPrefix, envPrefix)
 	}
-	if d.TritonKeyFile == "" {
-		return fmt.Errorf("%s driver requires the --%skey-file/%sKEY_FILE option", driverName, flagPrefix, envPrefix)
+	if d.TritonKeyPath == "" {
+		return fmt.Errorf("%s driver requires the --%skey-file/%sKEY_PATH option", driverName, flagPrefix, envPrefix)
 	}
 	if d.TritonKeyId == "" {
 		return fmt.Errorf("%s driver requires the --%skey-id/%sKEY_ID option", driverName, flagPrefix, envPrefix)
@@ -115,7 +115,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: envPrefix + "KEY_FILE",
 			Name:   flagPrefix + "key-file",
 			Usage:  fmt.Sprintf("An SSH private key file that has been added to $%sACCOUNT", envPrefix),
-			Value:  defaultTritonKeyFile,
+			Value:  defaultTritonKeyPath,
 		},
 
 		mcnflag.StringFlag{
@@ -132,7 +132,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 }
 
 func (d Driver) client() (*cloudapi.Client, error) {
-	keyData, err := ioutil.ReadFile(d.TritonKeyFile)
+	keyData, err := ioutil.ReadFile(d.TritonKeyPath)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (d *Driver) getMachine() (*cloudapi.Machine, error) {
 func NewDriver(hostName, storePath string) Driver {
 	return Driver{
 		TritonAccount: defaultTritonAccount,
-		TritonKeyFile: defaultTritonKeyFile,
+		TritonKeyPath: defaultTritonKeyPath,
 		TritonKeyId:   defaultTritonKeyId,
 		TritonUrl:     defaultTritonUrl,
 
@@ -338,7 +338,7 @@ func (d *Driver) GetURL() (string, error) {
 }
 
 func (d *Driver) GetSSHKeyPath() string {
-	return d.TritonKeyFile
+	return d.TritonKeyPath
 }
 
 // GetState returns the state that the host is in (running, stopped, etc)
