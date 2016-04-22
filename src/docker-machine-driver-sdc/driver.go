@@ -34,8 +34,7 @@ var (
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8-20150702
 	defaultSdcImage = "2f56d126-20d0-11e5-9e5b-5f3ef6688aba"
 
-	// "g3-standard-0.25-kvm"
-	defaultSdcPackage = "f13b10ca-1a63-4903-b29e-8615ea3858a6"
+	defaultSdcPackage = "g3-standard-0.25-kvm"
 
 	errUnimplemented = errors.New("UNIMPLEMENTED")
 )
@@ -226,7 +225,15 @@ func (d *Driver) PreCreateCheck() error {
 		return err
 	}
 
-	// TODO verify d.SdcImage and d.SdcPackage (including resolving names to UUIDs)
+	if _, err := client.GetImage(d.SdcImage); err != nil {
+		// TODO apparently isn't a valid ID, but might be a name like "debian-8" (so let's do a lookup)
+		return err
+	}
+
+	// GetPackage (and CreateMachine) both support package names and UUIDs interchangeably
+	if _, err := client.GetPackage(d.SdcPackage); err != nil {
+		return err
+	}
 
 	return nil
 }
