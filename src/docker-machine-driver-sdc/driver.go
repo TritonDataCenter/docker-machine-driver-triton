@@ -121,12 +121,12 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 
 		mcnflag.StringFlag{
 			Name:  flagPrefix + "image",
-			Usage: "VM image to provision",
+			Usage: `VM image to provision ("debian-8", "debian-8@20150527", "ca291f66", etc)`,
 			Value: defaultSdcImage,
 		},
 		mcnflag.StringFlag{
 			Name:  flagPrefix + "package",
-			Usage: "VM instance size to create",
+			Usage: `VM instance size to create ("g3-standard-0.25-kvm", "g3-standard-0.5-kvm", etc)`,
 			Value: defaultSdcPackage,
 		},
 	}
