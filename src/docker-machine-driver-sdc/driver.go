@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	driverName = "sdc"
+	driverName = "triton"
 	flagPrefix = driverName + "-"
-	envPrefix  = "SDC_"
+	envPrefix  = "TRITON_"
 )
 
 var (
