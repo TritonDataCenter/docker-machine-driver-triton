@@ -36,6 +36,8 @@ var (
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
 	defaultTritonImage   = "debian-8"
 	defaultTritonPackage = "g3-standard-0.25-kvm"
+
+	errUnimplemented = errors.New("UNIMPLEMENTED")
 )
 
 type Driver struct {
@@ -58,7 +60,7 @@ type Driver struct {
 // SetConfigFromFlags configures the driver with the object that was returned by RegisterCreateFlags
 func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.TritonAccount = opts.String(flagPrefix + "account")
-	d.TritonKeyPath = opts.String(flagPrefix + "key-file")
+	d.TritonKeyPath = opts.String(flagPrefix + "key-path")
 	d.TritonKeyId = opts.String(flagPrefix + "key-id")
 	d.TritonUrl = opts.String(flagPrefix + "url")
 
@@ -71,7 +73,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 		return fmt.Errorf("%s driver requires the --%saccount/%sACCOUNT option", driverName, flagPrefix, envPrefix)
 	}
 	if d.TritonKeyPath == "" {
-		return fmt.Errorf("%s driver requires the --%skey-file/%sKEY_PATH option", driverName, flagPrefix, envPrefix)
+		return fmt.Errorf("%s driver requires the --%skey-path/%sKEY_PATH option", driverName, flagPrefix, envPrefix)
 	}
 	if d.TritonKeyId == "" {
 		return fmt.Errorf("%s driver requires the --%skey-id/%sKEY_ID option", driverName, flagPrefix, envPrefix)
@@ -108,13 +110,13 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		mcnflag.StringFlag{
 			EnvVar: envPrefix + "KEY_ID",
 			Name:   flagPrefix + "key-id",
-			Usage:  fmt.Sprintf(`The fingerprint of $%sKEY_FILE (ssh-keygen -l -E md5 -f $%sKEY_FILE | awk '{ gsub(/^[^:]+:/, "", $2); print $2 }')`, envPrefix, envPrefix),
+			Usage:  fmt.Sprintf(`The fingerprint of $%sKEY_PATH (ssh-keygen -l -E md5 -f $%sKEY_PATH | awk '{ gsub(/^[^:]+:/, "", $2); print $2 }')`, envPrefix, envPrefix),
 			Value:  defaultTritonKeyId,
 		},
 		mcnflag.StringFlag{
-			EnvVar: envPrefix + "KEY_FILE",
-			Name:   flagPrefix + "key-file",
-			Usage:  fmt.Sprintf("An SSH private key file that has been added to $%sACCOUNT", envPrefix),
+			EnvVar: envPrefix + "KEY_PATH",
+			Name:   flagPrefix + "key-path",
+			Usage:  fmt.Sprintf("A path to an SSH private key file that has been added to $%sACCOUNT", envPrefix),
 			Value:  defaultTritonKeyPath,
 		},
 
