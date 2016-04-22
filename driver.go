@@ -22,66 +22,67 @@ import (
 const (
 	driverName = "triton"
 	flagPrefix = driverName + "-"
-	envPrefix  = "TRITON_"
+	// SDC_ is for historical reasons
+	envPrefix  = "SDC_"
 )
 
 var (
-	defaultSdcAccount = ""
-	defaultSdcKeyFile = os.Getenv("HOME") + "/.ssh/id_rsa"
-	defaultSdcKeyId   = ""
-	defaultSdcUrl     = "https://us-east-1.api.joyent.com"
+	defaultTritonAccount = ""
+	defaultTritonKeyPath = os.Getenv("HOME") + "/.ssh/id_rsa"
+	defaultTritonKeyId   = ""
+	defaultTritonUrl     = "https://us-east-1.api.joyent.com"
 
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
-	defaultSdcImage   = "debian-8"
-	defaultSdcPackage = "g3-standard-0.25-kvm"
+	defaultTritonImage   = "debian-8"
+	defaultTritonPackage = "g3-standard-0.25-kvm"
 )
 
 type Driver struct {
 	*drivers.BaseDriver
 
 	// authentication/access parameters
-	SdcAccount string
-	SdcKeyFile string
-	SdcKeyId   string
-	SdcUrl     string
+	TritonAccount string
+	TritonKeyPath string
+	TritonKeyId   string
+	TritonUrl     string
 
 	// machine creation parameters
-	SdcImage   string
-	SdcPackage string
+	TritonImage   string
+	TritonPackage string
 
 	// machine state
-	SdcMachineId string
+	TritonMachineId string
 }
 
 // SetConfigFromFlags configures the driver with the object that was returned by RegisterCreateFlags
 func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
-	d.SdcAccount = opts.String(flagPrefix + "account")
-	d.SdcKeyFile = opts.String(flagPrefix + "key-file")
-	d.SdcKeyId = opts.String(flagPrefix + "key-id")
-	d.SdcUrl = opts.String(flagPrefix + "url")
+	d.TritonAccount = opts.String(flagPrefix + "account")
+	d.TritonKeyPath = opts.String(flagPrefix + "key-path")
+	d.TritonKeyId = opts.String(flagPrefix + "key-id")
+	d.TritonUrl = opts.String(flagPrefix + "url")
 
-	d.SdcImage = opts.String(flagPrefix + "image")
-	d.SdcPackage = opts.String(flagPrefix + "package")
+	d.TritonImage = opts.String(flagPrefix + "image")
+	d.TritonPackage = opts.String(flagPrefix + "package")
 
 	d.SetSwarmConfigFromFlags(opts)
 
-	if d.SdcAccount == "" {
+	if d.TritonAccount == "" {
 		return fmt.Errorf("%s driver requires the --%saccount/%sACCOUNT option", driverName, flagPrefix, envPrefix)
 	}
-	if d.SdcKeyFile == "" {
-		return fmt.Errorf("%s driver requires the --%skey-file/%sKEY_FILE option", driverName, flagPrefix, envPrefix)
+	if d.TritonKeyPath == "" {
+		return fmt.Errorf("%s driver requires the --%skey-path/%sKEY_PATH option", driverName, flagPrefix, envPrefix)
 	}
-	if d.SdcKeyId == "" {
+	if d.TritonKeyId == "" {
 		return fmt.Errorf("%s driver requires the --%skey-id/%sKEY_ID option", driverName, flagPrefix, envPrefix)
 	}
-	if d.SdcUrl == "" {
+	if d.TritonUrl == "" {
 		return fmt.Errorf("%s driver requires the --%surl/%sURL option", driverName, flagPrefix, envPrefix)
 	}
 
-	if d.SdcImage == "" {
+	if d.TritonImage == "" {
 		return fmt.Errorf("%s driver requires the --%simage option", driverName, flagPrefix)
 	}
-	if d.SdcPackage == "" {
+	if d.TritonPackage == "" {
 		return fmt.Errorf("%s driver requires the --%spackage option", driverName, flagPrefix)
 	}
 
@@ -95,58 +96,58 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: envPrefix + "URL",
 			Name:   flagPrefix + "url",
 			Usage:  "URL of the CloudAPI endpoint",
-			Value:  defaultSdcUrl,
+			Value:  defaultTritonUrl,
 		},
 		mcnflag.StringFlag{
 			EnvVar: envPrefix + "ACCOUNT",
 			Name:   flagPrefix + "account",
 			Usage:  "Login name/username",
-			Value:  defaultSdcAccount,
+			Value:  defaultTritonAccount,
 		},
 		mcnflag.StringFlag{
 			EnvVar: envPrefix + "KEY_ID",
 			Name:   flagPrefix + "key-id",
-			Usage:  fmt.Sprintf(`The fingerprint of $%sKEY_FILE (ssh-keygen -l -E md5 -f $%sKEY_FILE | awk '{ gsub(/^[^:]+:/, "", $2); print $2 }')`, envPrefix, envPrefix),
-			Value:  defaultSdcKeyId,
+			Usage:  fmt.Sprintf(`The fingerprint of $%sKEY_PATH (ssh-keygen -l -E md5 -f $%sKEY_PATH | awk '{ gsub(/^[^:]+:/, "", $2); print $2 }')`, envPrefix, envPrefix),
+			Value:  defaultTritonKeyId,
 		},
 		mcnflag.StringFlag{
-			EnvVar: envPrefix + "KEY_FILE",
-			Name:   flagPrefix + "key-file",
-			Usage:  fmt.Sprintf("An SSH private key file that has been added to $%sACCOUNT", envPrefix),
-			Value:  defaultSdcKeyFile,
+			EnvVar: envPrefix + "KEY_PATH",
+			Name:   flagPrefix + "key-path",
+			Usage:  fmt.Sprintf("A path to an SSH private key file that has been added to $%sACCOUNT", envPrefix),
+			Value:  defaultTritonKeyPath,
 		},
 
 		mcnflag.StringFlag{
 			Name:  flagPrefix + "image",
 			Usage: `VM image to provision ("debian-8", "debian-8@20150527", "ca291f66", etc)`,
-			Value: defaultSdcImage,
+			Value: defaultTritonImage,
 		},
 		mcnflag.StringFlag{
 			Name:  flagPrefix + "package",
 			Usage: `VM instance size to create ("g3-standard-0.25-kvm", "g3-standard-0.5-kvm", etc)`,
-			Value: defaultSdcPackage,
+			Value: defaultTritonPackage,
 		},
 	}
 }
 
 func (d Driver) client() (*cloudapi.Client, error) {
-	keyData, err := ioutil.ReadFile(d.SdcKeyFile)
+	keyData, err := ioutil.ReadFile(d.TritonKeyPath)
 	if err != nil {
 		return nil, err
 	}
-	userAuth, err := auth.NewAuth(d.SdcAccount, string(keyData), "rsa-sha256")
+	userAuth, err := auth.NewAuth(d.TritonAccount, string(keyData), "rsa-sha256")
 	if err != nil {
 		return nil, err
 	}
 
 	creds := &auth.Credentials{
 		UserAuthentication: userAuth,
-		SdcKeyId:           d.SdcKeyId,
-		SdcEndpoint:        auth.Endpoint{URL: d.SdcUrl},
+		TritonKeyId:           d.TritonKeyId,
+		TritonEndpoint:        auth.Endpoint{URL: d.TritonUrl},
 	}
 
 	return cloudapi.New(client.NewClient(
-		creds.SdcEndpoint.URL,
+		creds.TritonEndpoint.URL,
 		cloudapi.DefaultAPIVersion,
 		creds,
 		stdlog.New(os.Stderr, "", stdlog.LstdFlags),
@@ -157,7 +158,7 @@ func (d *Driver) getMachine() (*cloudapi.Machine, error) {
 	if err != nil {
 		return nil, err
 	}
-	machine, err := client.GetMachine(d.SdcMachineId)
+	machine, err := client.GetMachine(d.TritonMachineId)
 	if err != nil {
 		return nil, err
 	}
@@ -172,10 +173,10 @@ func (d *Driver) getMachine() (*cloudapi.Machine, error) {
 
 func NewDriver(hostName, storePath string) Driver {
 	return Driver{
-		SdcAccount: defaultSdcAccount,
-		SdcKeyFile: defaultSdcKeyFile,
-		SdcKeyId:   defaultSdcKeyId,
-		SdcUrl:     defaultSdcUrl,
+		TritonAccount: defaultTritonAccount,
+		TritonKeyPath: defaultTritonKeyPath,
+		TritonKeyId:   defaultTritonKeyId,
+		TritonUrl:     defaultTritonUrl,
 
 		BaseDriver: &drivers.BaseDriver{
 			MachineName: hostName,
@@ -197,14 +198,14 @@ func (d *Driver) Create() error {
 	machine, err := client.CreateMachine(cloudapi.CreateMachineOpts{
 		Name: d.MachineName,
 
-		Image:   d.SdcImage,
-		Package: d.SdcPackage,
+		Image:   d.TritonImage,
+		Package: d.TritonPackage,
 	})
 	if err != nil {
 		return err
 	}
 
-	d.SdcMachineId = machine.Id
+	d.TritonMachineId = machine.Id
 
 	return nil
 }
@@ -230,10 +231,10 @@ func (d *Driver) PreCreateCheck() error {
 		return err
 	}
 
-	if _, err := client.GetImage(d.SdcImage); err != nil {
+	if _, err := client.GetImage(d.TritonImage); err != nil {
 		// apparently isn't a valid ID, but might be a name like "debian-8" (so let's do a lookup)
 		// https://github.com/joyent/node-triton/blob/aeed6d91922ea117a42eac0cef4a3df67fbfed2f/lib/tritonapi.js#L368
-		nameVersion := strings.SplitN(d.SdcImage, "@", 2)
+		nameVersion := strings.SplitN(d.TritonImage, "@", 2)
 		name, version := nameVersion[0], ""
 		if len(nameVersion) == 2 {
 			version = nameVersion[1]
@@ -258,8 +259,8 @@ func (d *Driver) PreCreateCheck() error {
 			}
 		}
 		if len(nameMatches) == 1 {
-			log.Infof("resolved image %q to %q (exact name match)", d.SdcImage, nameMatches[0].Id)
-			d.SdcImage = nameMatches[0].Id
+			log.Infof("resolved image %q to %q (exact name match)", d.TritonImage, nameMatches[0].Id)
+			d.TritonImage = nameMatches[0].Id
 		} else if len(nameMatches) > 1 {
 			mostRecent := nameMatches[0]
 			published, timeErr := iso8859(mostRecent.PublishedAt)
@@ -276,21 +277,21 @@ func (d *Driver) PreCreateCheck() error {
 					published = newPublished
 				}
 			}
-			log.Infof("resolved image %q to %q (most recent of %d name matches)", d.SdcImage, mostRecent.Id, len(nameMatches))
-			d.SdcImage = mostRecent.Id
+			log.Infof("resolved image %q to %q (most recent of %d name matches)", d.TritonImage, mostRecent.Id, len(nameMatches))
+			d.TritonImage = mostRecent.Id
 		} else if len(shortIdMatches) == 1 {
-			log.Infof("resolved image %q to %q (exact short id match)", d.SdcImage, shortIdMatches[0].Id)
-			d.SdcImage = shortIdMatches[0].Id
+			log.Infof("resolved image %q to %q (exact short id match)", d.TritonImage, shortIdMatches[0].Id)
+			d.TritonImage = shortIdMatches[0].Id
 		} else {
 			if len(shortIdMatches) > 1 {
-				log.Warnf("image %q is an ambiguous short id", d.SdcImage)
+				log.Warnf("image %q is an ambiguous short id", d.TritonImage)
 			}
 			return err
 		}
 	}
 
 	// GetPackage (and CreateMachine) both support package names and UUIDs interchangeably
-	if _, err := client.GetPackage(d.SdcPackage); err != nil {
+	if _, err := client.GetPackage(d.TritonPackage); err != nil {
 		return err
 	}
 
@@ -336,7 +337,7 @@ func (d *Driver) GetURL() (string, error) {
 }
 
 func (d *Driver) GetSSHKeyPath() string {
-	return d.SdcKeyFile
+	return d.TritonKeyPath
 }
 
 // GetState returns the state that the host is in (running, stopped, etc)
@@ -362,7 +363,7 @@ func (d *Driver) GetState() (state.State, error) {
 		return state.Stopped, nil
 	}
 
-	return state.Error, fmt.Errorf("unknown SDC machine state: %s", machine.State)
+	return state.Error, fmt.Errorf("unknown Triton instance state: %s", machine.State)
 }
 
 // Kill stops a host forcefully
@@ -377,7 +378,7 @@ func (d *Driver) Remove() error {
 	if err != nil {
 		return err
 	}
-	return client.DeleteMachine(d.SdcMachineId)
+	return client.DeleteMachine(d.TritonMachineId)
 }
 
 // Restart a host. This may just call Stop(); Start() if the provider does not have any special restart behaviour.
@@ -386,7 +387,7 @@ func (d *Driver) Restart() error {
 	if err != nil {
 		return err
 	}
-	return client.RebootMachine(d.SdcMachineId)
+	return client.RebootMachine(d.TritonMachineId)
 }
 
 // Start a host
@@ -395,7 +396,7 @@ func (d *Driver) Start() error {
 	if err != nil {
 		return err
 	}
-	return client.StartMachine(d.SdcMachineId)
+	return client.StartMachine(d.TritonMachineId)
 }
 
 // Stop a host gracefully
@@ -404,5 +405,5 @@ func (d *Driver) Stop() error {
 	if err != nil {
 		return err
 	}
-	return client.StopMachine(d.SdcMachineId)
+	return client.StopMachine(d.TritonMachineId)
 }
