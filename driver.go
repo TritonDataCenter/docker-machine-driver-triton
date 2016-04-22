@@ -23,7 +23,7 @@ import (
 const (
 	driverName = "triton"
 	flagPrefix = driverName + "-"
-    // SDC_ is for historical reasons
+	// SDC_ is for historical reasons
 	envPrefix  = "SDC_"
 )
 
