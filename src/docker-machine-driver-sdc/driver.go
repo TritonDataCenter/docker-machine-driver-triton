@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	stdlog "log"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/engine"
@@ -30,10 +32,8 @@ var (
 	defaultSdcKeyId   = ""
 	defaultSdcUrl     = "https://us-east-1.api.joyent.com"
 
-	// "debian-8/20150702"
-	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8-20150702
-	defaultSdcImage = "2f56d126-20d0-11e5-9e5b-5f3ef6688aba"
-
+	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
+	defaultSdcImage   = "debian-8"
 	defaultSdcPackage = "g3-standard-0.25-kvm"
 
 	errUnimplemented = errors.New("UNIMPLEMENTED")
@@ -212,6 +212,14 @@ func (d *Driver) Create() error {
 	return nil
 }
 
+// https://github.com/joyent/node-triton/blob/aeed6d91922ea117a42eac0cef4a3df67fbfed2f/lib/common.js#L306
+func uuidToShortId(s string) string {
+	return strings.SplitN(s, "-", 2)[0]
+}
+func iso8859(s string) (time.Time, error) {
+	return time.Parse(time.RFC3339, s)
+}
+
 // PreCreateCheck allows for pre-create operations to make sure a driver is ready for creation
 func (d *Driver) PreCreateCheck() error {
 	client, err := d.client()
@@ -226,8 +234,62 @@ func (d *Driver) PreCreateCheck() error {
 	}
 
 	if _, err := client.GetImage(d.SdcImage); err != nil {
-		// TODO apparently isn't a valid ID, but might be a name like "debian-8" (so let's do a lookup)
-		return err
+		// apparently isn't a valid ID, but might be a name like "debian-8" (so let's do a lookup)
+		// https://github.com/joyent/node-triton/blob/aeed6d91922ea117a42eac0cef4a3df67fbfed2f/lib/tritonapi.js#L368
+		nameVersion := strings.SplitN(d.SdcImage, "@", 2)
+		name, version := nameVersion[0], ""
+		if len(nameVersion) == 2 {
+			version = nameVersion[1]
+		}
+		filter := cloudapi.NewFilter()
+		filter.Add("state", "all")
+		if version != "" {
+			filter.Add("name", name)
+			filter.Add("version", version)
+		}
+		images, imagesErr := client.ListImages(filter)
+		if imagesErr != nil {
+			return imagesErr
+		}
+		nameMatches, shortIdMatches := []cloudapi.Image{}, []cloudapi.Image{}
+		for _, image := range images {
+			if name == image.Name {
+				nameMatches = append(nameMatches, image)
+			}
+			if name == uuidToShortId(image.Id) {
+				shortIdMatches = append(shortIdMatches, image)
+			}
+		}
+		if len(nameMatches) == 1 {
+			log.Infof("resolved image %q to %q (exact name match)", d.SdcImage, nameMatches[0].Id)
+			d.SdcImage = nameMatches[0].Id
+		} else if len(nameMatches) > 1 {
+			mostRecent := nameMatches[0]
+			published, timeErr := iso8859(mostRecent.PublishedAt)
+			if timeErr != nil {
+				return timeErr
+			}
+			for _, image := range nameMatches[1:] {
+				newPublished, timeErr := iso8859(image.PublishedAt)
+				if timeErr != nil {
+					return timeErr
+				}
+				if published.Before(newPublished) {
+					mostRecent = image
+					published = newPublished
+				}
+			}
+			log.Infof("resolved image %q to %q (most recent of %d name matches)", d.SdcImage, mostRecent.Id, len(nameMatches))
+			d.SdcImage = mostRecent.Id
+		} else if len(shortIdMatches) == 1 {
+			log.Infof("resolved image %q to %q (exact short id match)", d.SdcImage, shortIdMatches[0].Id)
+			d.SdcImage = shortIdMatches[0].Id
+		} else {
+			if len(shortIdMatches) > 1 {
+				log.Warnf("image %q is an ambiguous short id", d.SdcImage)
+			}
+			return err
+		}
 	}
 
 	// GetPackage (and CreateMachine) both support package names and UUIDs interchangeably
