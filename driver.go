@@ -23,7 +23,7 @@ const (
 	driverName = "triton"
 	flagPrefix = driverName + "-"
 	// SDC_ is for historical reasons
-	envPrefix  = "SDC_"
+	envPrefix = "SDC_"
 )
 
 var (
@@ -142,12 +142,12 @@ func (d Driver) client() (*cloudapi.Client, error) {
 
 	creds := &auth.Credentials{
 		UserAuthentication: userAuth,
-		TritonKeyId:           d.TritonKeyId,
-		TritonEndpoint:        auth.Endpoint{URL: d.TritonUrl},
+		SdcKeyId:           d.TritonKeyId,
+		SdcEndpoint:        auth.Endpoint{URL: d.TritonUrl},
 	}
 
 	return cloudapi.New(client.NewClient(
-		creds.TritonEndpoint.URL,
+		creds.SdcEndpoint.URL,
 		cloudapi.DefaultAPIVersion,
 		creds,
 		stdlog.New(os.Stderr, "", stdlog.LstdFlags),
