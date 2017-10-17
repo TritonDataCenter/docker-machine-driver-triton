@@ -132,8 +132,8 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Value: defaultTritonPackage,
 		},
 		mcnflag.StringFlag{
-			EnvVar: "OS_SSH_USER",
-			Name:   "triton-ssh-user",
+			EnvVar: envPrefix + "SSH_USER",
+			Name:   flagPrefix + "ssh-user",
 			Usage:  "Triton SSH user",
 			Value:  defaultSSHUser,
 		},
