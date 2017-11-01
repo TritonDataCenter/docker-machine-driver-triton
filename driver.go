@@ -1,9 +1,10 @@
 package main
 
 import (
+	"context"
+	"encoding/pem"
 	"fmt"
 	"io/ioutil"
-	stdlog "log"
 	"os"
 	"strings"
 	"time"
@@ -14,9 +15,9 @@ import (
 	"github.com/docker/machine/libmachine/mcnflag"
 	"github.com/docker/machine/libmachine/state"
 
-	"github.com/joyent/gocommon/client"
-	"github.com/joyent/gosdc/cloudapi"
-	"github.com/joyent/gosign/auth"
+	"github.com/joyent/triton-go"
+	auth "github.com/joyent/triton-go/authentication"
+	"github.com/joyent/triton-go/compute"
 )
 
 const (
@@ -28,15 +29,14 @@ const (
 
 var (
 	defaultTritonAccount = ""
-	defaultTritonKeyPath = os.Getenv("HOME") + "/.ssh/id_rsa"
+	defaultTritonKeyPath = "" // os.Getenv("HOME") + "/.ssh/id_rsa"
 	defaultTritonKeyId   = ""
 	defaultTritonUrl     = "https://us-east-1.api.joyent.com"
 
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
 	defaultTritonImage   = "debian-8"
-	defaultTritonPackage = "g3-standard-0.25-kvm"
-
-	defaultSSHUser = "root"
+	defaultTritonPackage = "k4-highcpu-kvm-250M"
+	defaultSSHUser       = "root"
 )
 
 type Driver struct {
@@ -73,9 +73,9 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	if d.TritonAccount == "" {
 		return fmt.Errorf("%s driver requires the --%saccount/%sACCOUNT option", driverName, flagPrefix, envPrefix)
 	}
-	if d.TritonKeyPath == "" {
-		return fmt.Errorf("%s driver requires the --%skey-path/%sKEY_PATH option", driverName, flagPrefix, envPrefix)
-	}
+	// if d.TritonKeyPath == "" {
+	// 	return fmt.Errorf("%s driver requires the --%skey-path/%sKEY_PATH option", driverName, flagPrefix, envPrefix)
+	// }
 	if d.TritonKeyId == "" {
 		return fmt.Errorf("%s driver requires the --%skey-id/%sKEY_ID option", driverName, flagPrefix, envPrefix)
 	}
@@ -140,35 +140,62 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 	}
 }
 
-func (d Driver) client() (*cloudapi.Client, error) {
-	keyData, err := ioutil.ReadFile(d.TritonKeyPath)
-	if err != nil {
-		return nil, err
-	}
-	userAuth, err := auth.NewAuth(d.TritonAccount, string(keyData), "rsa-sha256")
-	if err != nil {
-		return nil, err
+func (d Driver) client() (*compute.ComputeClient, error) {
+	var signer auth.Signer
+	var err error
+
+	if d.TritonKeyPath == "" {
+		signer, err = auth.NewSSHAgentSigner(d.TritonKeyId, d.TritonAccount)
+		if err != nil {
+			return nil, fmt.Errorf("error Creating SSH Agent Signer: %s", err)
+		}
+	} else {
+		if _, err = os.Stat(d.TritonKeyPath); err != nil {
+			return nil, fmt.Errorf("error locating key path from %s: %s",
+				d.TritonKeyPath, err)
+		}
+
+		var keyBytes []byte
+		keyBytes, err = ioutil.ReadFile(d.TritonKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("error reading key material from %s: %s",
+				d.TritonKeyPath, err)
+		}
+
+		block, _ := pem.Decode(keyBytes)
+		if block == nil {
+			return nil, fmt.Errorf("failed to read key material '%s': no key found",
+				d.TritonKeyPath)
+		}
+		if block.Headers["Proc-Type"] == "4,ENCRYPTED" {
+			return nil, fmt.Errorf("failed to read key '%s': password protected keys are\n"+
+				"not currently supported. Please decrypt the key prior to use.",
+				d.TritonKeyPath)
+		}
+
+		signer, err = auth.NewPrivateKeySigner(d.TritonKeyId, []byte(d.TritonKeyPath), d.TritonAccount)
+		if err != nil {
+			return nil, fmt.Errorf("error creating SSH private key signer: %s", err)
+		}
 	}
 
-	creds := &auth.Credentials{
-		UserAuthentication: userAuth,
-		SdcKeyId:           d.TritonKeyId,
-		SdcEndpoint:        auth.Endpoint{URL: d.TritonUrl},
+	config := &triton.ClientConfig{
+		TritonURL:   d.TritonUrl,
+		AccountName: d.TritonAccount,
+		Signers:     []auth.Signer{signer},
 	}
 
-	return cloudapi.New(client.NewClient(
-		creds.SdcEndpoint.URL,
-		cloudapi.DefaultAPIVersion,
-		creds,
-		stdlog.New(os.Stderr, "", stdlog.LstdFlags),
-	)), nil
+	return compute.NewClient(config)
 }
-func (d *Driver) getMachine() (*cloudapi.Machine, error) {
-	client, err := d.client()
+
+func (d *Driver) getMachine() (*compute.Instance, error) {
+	c, err := d.client()
 	if err != nil {
 		return nil, err
 	}
-	machine, err := client.GetMachine(d.TritonMachineId)
+	machine, err := c.Instances().Get(context.Background(), &compute.GetInstanceInput{
+		ID: d.TritonMachineId,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -199,24 +226,24 @@ func NewDriver(hostName, storePath string) Driver {
 // https://github.com/docker/machine/blob/v0.7.0/libmachine/drivers/drivers.go
 // https://github.com/docker/machine/blob/v0.7.0/libmachine/drivers/base.go
 
-// Create a host using the driver's config
+// Create a host on Triton using the driver's CLI/environ config
 func (d *Driver) Create() error {
-	client, err := d.client()
+	c, err := d.client()
 	if err != nil {
 		return err
 	}
 
-	machine, err := client.CreateMachine(cloudapi.CreateMachineOpts{
-		Name: d.MachineName,
-
+	input := &compute.CreateInstanceInput{
+		Name:    d.MachineName,
 		Image:   d.TritonImage,
 		Package: d.TritonPackage,
-	})
+	}
+	machine, err := c.Instances().Create(context.Background(), input)
 	if err != nil {
 		return err
 	}
 
-	d.TritonMachineId = machine.Id
+	d.TritonMachineId = machine.ID
 
 	return nil
 }
@@ -229,70 +256,71 @@ func iso8859(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339, s)
 }
 
-// PreCreateCheck allows for pre-create operations to make sure a driver is ready for creation
+// PreCreateCheck allows for pre-create operations to make sure a driver is
+// ready for creation
 func (d *Driver) PreCreateCheck() error {
-	client, err := d.client()
+	c, err := d.client()
 	if err != nil {
 		return err
 	}
 
-	// TODO find a better "Ping" method
-	_, err = client.CountMachines()
+	_, err = c.Ping(context.Background())
 	if err != nil {
 		return err
 	}
 
-	if _, err := client.GetImage(d.TritonImage); err != nil {
-		// apparently isn't a valid ID, but might be a name like "debian-8" (so let's do a lookup)
+	_, err = c.Images().Get(context.Background(), &compute.GetImageInput{
+		ImageID: d.TritonImage,
+	})
+	if err != nil {
+		// apparently isn't a valid ID, but might be a name like "debian-8" (so
+		// let's do a lookup)
 		// https://github.com/joyent/node-triton/blob/aeed6d91922ea117a42eac0cef4a3df67fbfed2f/lib/tritonapi.js#L368
 		nameVersion := strings.SplitN(d.TritonImage, "@", 2)
 		name, version := nameVersion[0], ""
 		if len(nameVersion) == 2 {
 			version = nameVersion[1]
 		}
-		filter := cloudapi.NewFilter()
-		filter.Add("state", "all")
+
+		listInput := &compute.ListImagesInput{}
+		listInput.State = "all"
 		if version != "" {
-			filter.Add("name", name)
-			filter.Add("version", version)
+			listInput.Name = name
+			listInput.Version = version
 		}
-		images, imagesErr := client.ListImages(filter)
+
+		images, imagesErr := c.Images().List(context.Background(), listInput)
 		if imagesErr != nil {
 			return imagesErr
 		}
-		nameMatches, shortIdMatches := []cloudapi.Image{}, []cloudapi.Image{}
+		nameMatches, shortIdMatches := []*compute.Image{}, []*compute.Image{}
 		for _, image := range images {
 			if name == image.Name {
 				nameMatches = append(nameMatches, image)
 			}
-			if name == uuidToShortId(image.Id) {
+			if name == uuidToShortId(image.ID) {
 				shortIdMatches = append(shortIdMatches, image)
 			}
 		}
 		if len(nameMatches) == 1 {
-			log.Infof("resolved image %q to %q (exact name match)", d.TritonImage, nameMatches[0].Id)
-			d.TritonImage = nameMatches[0].Id
+			log.Infof("resolved image %q to %q (exact name match)", d.TritonImage, nameMatches[0].ID)
+			d.TritonImage = nameMatches[0].ID
 		} else if len(nameMatches) > 1 {
 			mostRecent := nameMatches[0]
-			published, timeErr := iso8859(mostRecent.PublishedAt)
-			if timeErr != nil {
-				return timeErr
-			}
+			published := mostRecent.PublishedAt
+
 			for _, image := range nameMatches[1:] {
-				newPublished, timeErr := iso8859(image.PublishedAt)
-				if timeErr != nil {
-					return timeErr
-				}
+				newPublished := image.PublishedAt
 				if published.Before(newPublished) {
 					mostRecent = image
 					published = newPublished
 				}
 			}
-			log.Infof("resolved image %q to %q (most recent of %d name matches)", d.TritonImage, mostRecent.Id, len(nameMatches))
-			d.TritonImage = mostRecent.Id
+			log.Infof("resolved image %q to %q (most recent of %d name matches)", d.TritonImage, mostRecent.ID, len(nameMatches))
+			d.TritonImage = mostRecent.ID
 		} else if len(shortIdMatches) == 1 {
-			log.Infof("resolved image %q to %q (exact short id match)", d.TritonImage, shortIdMatches[0].Id)
-			d.TritonImage = shortIdMatches[0].Id
+			log.Infof("resolved image %q to %q (exact short id match)", d.TritonImage, shortIdMatches[0].ID)
+			d.TritonImage = shortIdMatches[0].ID
 		} else {
 			if len(shortIdMatches) > 1 {
 				log.Warnf("image %q is an ambiguous short id", d.TritonImage)
@@ -302,7 +330,10 @@ func (d *Driver) PreCreateCheck() error {
 	}
 
 	// GetPackage (and CreateMachine) both support package names and UUIDs interchangeably
-	if _, err := client.GetPackage(d.TritonPackage); err != nil {
+	pkgInput := &compute.GetPackageInput{
+		ID: d.TritonPackage,
+	}
+	if _, err := c.Packages().Get(context.Background(), pkgInput); err != nil {
 		return err
 	}
 
@@ -352,9 +383,9 @@ func (d *Driver) GetSSHKeyPath() string {
 }
 
 // GetState returns the state that the host is in (running, stopped, etc)
+//
+// https://github.com/docker/machine/blob/v0.7.0/libmachine/state/state.go
 func (d *Driver) GetState() (state.State, error) {
-	// https://github.com/docker/machine/blob/v0.7.0/libmachine/state/state.go
-
 	machine, err := d.getMachine()
 	if err != nil {
 		return state.Error, err
@@ -379,42 +410,62 @@ func (d *Driver) GetState() (state.State, error) {
 
 // Kill stops a host forcefully
 func (d *Driver) Kill() error {
-	// TODO find something more forceful than "Stop"
 	return d.Stop()
 }
 
 // Remove a host
 func (d *Driver) Remove() error {
-	client, err := d.client()
+	c, err := d.client()
 	if err != nil {
 		return err
 	}
-	return client.DeleteMachine(d.TritonMachineId)
+
+	ctx := context.Background()
+	input := &compute.DeleteInstanceInput{
+		ID: d.TritonMachineId,
+	}
+	return c.Instances().Delete(ctx, input)
 }
 
-// Restart a host. This may just call Stop(); Start() if the provider does not have any special restart behaviour.
+// Restart a host. This may just call Stop(); Start() if the provider does not
+// have any special restart behaviour.
 func (d *Driver) Restart() error {
-	client, err := d.client()
+	c, err := d.client()
 	if err != nil {
 		return err
 	}
-	return client.RebootMachine(d.TritonMachineId)
+
+	ctx := context.Background()
+	input := &compute.RebootInstanceInput{
+		InstanceID: d.TritonMachineId,
+	}
+	return c.Instances().Reboot(ctx, input)
 }
 
 // Start a host
 func (d *Driver) Start() error {
-	client, err := d.client()
+	c, err := d.client()
 	if err != nil {
 		return err
 	}
-	return client.StartMachine(d.TritonMachineId)
+
+	ctx := context.Background()
+	input := &compute.StartInstanceInput{
+		InstanceID: d.TritonMachineId,
+	}
+	return c.Instances().Start(ctx, input)
 }
 
 // Stop a host gracefully
 func (d *Driver) Stop() error {
-	client, err := d.client()
+	c, err := d.client()
 	if err != nil {
 		return err
 	}
-	return client.StopMachine(d.TritonMachineId)
+
+	ctx := context.Background()
+	input := &compute.StopInstanceInput{
+		InstanceID: d.TritonMachineId,
+	}
+	return c.Instances().Stop(ctx, input)
 }
