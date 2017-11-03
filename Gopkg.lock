@@ -27,37 +27,31 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/joyent/gocommon"
-  packages = [".","client","errors","http","jpc"]
-  revision = "b78708995d1c2ebdb64a3061b0bca5d8ccdf0fc2"
+  name = "github.com/hashicorp/errwrap"
+  packages = ["."]
+  revision = "7554cd9344cec97297fa6649b055a8c98c2a1e55"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/joyent/gosdc"
-  packages = ["cloudapi"]
-  revision = "ec8b3503a75edca0df26581b83807677b0240716"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/joyent/gosign"
-  packages = ["auth"]
-  revision = "9abcee278795b82b36858cdfc857c8a0e7de797c"
+  name = "github.com/joyent/triton-go"
+  packages = [".","authentication","client","compute"]
+  revision = "8f217b9dcc618ec8ca755a027a3666c021dd0d16"
+  version = "0.2.0"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/crypto"
-  packages = ["curve25519","ed25519","ed25519/internal/edwards25519","ssh","ssh/terminal"]
+  packages = ["curve25519","ed25519","ed25519/internal/edwards25519","ssh","ssh/agent","ssh/terminal"]
   revision = "bd6f299fb381e4c3393d1c4b1f0b94f5e77650c8"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix","windows"]
-  revision = "95c6576299259db960f6c5b9b69ea52422860fce"
+  revision = "46eaec7899b1dd945c25db17c78ba3f0c58a6613"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "7c53d46b2d1ad12d3825ff4265c6b0d1741752c11a1784fabac991ce65d0c48a"
+  inputs-digest = "2bbbf529a5b69f7a9f1df648d303de3c34c17e7fe4bdf1c35951a6a9c31f58f4"
   solver-name = "gps-cdcl"
   solver-version = 1
