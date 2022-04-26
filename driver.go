@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"github.com/docker/machine/libmachine/engine"
 	"github.com/docker/machine/libmachine/log"
 	"github.com/docker/machine/libmachine/mcnflag"
+	"github.com/docker/machine/libmachine/mcnutils"
 	"github.com/docker/machine/libmachine/state"
 
 	"github.com/joyent/triton-go"
@@ -28,10 +31,11 @@ const (
 )
 
 var (
-	defaultTritonAccount = ""
-	defaultTritonKeyPath = "" // os.Getenv("HOME") + "/.ssh/id_rsa"
-	defaultTritonKeyId   = ""
-	defaultTritonUrl     = "https://us-east-1.api.joyent.com"
+	defaultTritonAccount     = ""
+	defaultTritonKeyPath     = "" // os.Getenv("HOME") + "/.ssh/id_rsa"
+	defaultTritonKeyId       = ""
+	defaultTritonKeyMaterial = ""
+	defaultTritonUrl         = "https://us-east-1.api.joyent.com"
 
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
 	defaultTritonImage   = "debian-8"
@@ -43,10 +47,12 @@ type Driver struct {
 	*drivers.BaseDriver
 
 	// authentication/access parameters
-	TritonAccount string
-	TritonKeyPath string
-	TritonKeyId   string
-	TritonUrl     string
+	TritonAccount            string
+	TritonKeyPath            string
+	TritonKeyMaterial        string
+	TritonKeyMaterialDecoded string
+	TritonKeyId              string
+	TritonUrl                string
 
 	// machine creation parameters
 	TritonImage   string
@@ -60,6 +66,20 @@ type Driver struct {
 func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.TritonAccount = opts.String(flagPrefix + "account")
 	d.TritonKeyPath = opts.String(flagPrefix + "key-path")
+
+	d.TritonKeyMaterial = opts.String(flagPrefix + "key-material")
+
+	// the --triton-key-material argument has to be base-64 encoded since the raw private SSH key content
+	// contains new lines and the Rancher node template UI doesn't allow multi-line strings
+	if d.TritonKeyMaterial != "" {
+		decodedKey, err := base64.StdEncoding.DecodeString(d.TritonKeyMaterial)
+		if err != nil {
+			return fmt.Errorf("%s driver failed to base64 decode %skey-material", driverName, flagPrefix)
+		}
+
+		d.TritonKeyMaterialDecoded = string(decodedKey)
+	}
+
 	d.TritonKeyId = opts.String(flagPrefix + "key-id")
 	d.TritonUrl = opts.String(flagPrefix + "url")
 
@@ -122,6 +142,11 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		},
 
 		mcnflag.StringFlag{
+			Name:  flagPrefix + "key-material",
+			Usage: fmt.Sprintf("The SSH private key file content (base64 encoded) that has been added to $%sACCOUNT", envPrefix),
+			Value: defaultTritonKeyMaterial,
+		},
+		mcnflag.StringFlag{
 			Name:  flagPrefix + "image",
 			Usage: `VM image to provision ("debian-8", "debian-8@20150527", "ca291f66", etc)`,
 			Value: defaultTritonImage,
@@ -144,7 +169,12 @@ func (d Driver) client() (*compute.ComputeClient, error) {
 	var signer auth.Signer
 	var err error
 
-	if d.TritonKeyPath == "" {
+	if d.TritonKeyMaterialDecoded != "" {
+		signer, err = auth.NewPrivateKeySigner(d.TritonKeyId, []byte(d.TritonKeyMaterialDecoded), d.TritonAccount)
+		if err != nil {
+			return nil, fmt.Errorf("error creating SSH private key signer: %s", err)
+		}
+	} else if d.TritonKeyPath == "" {
 		signer, err = auth.NewSSHAgentSigner(d.TritonKeyId, d.TritonAccount)
 		if err != nil {
 			return nil, fmt.Errorf("error Creating SSH Agent Signer: %s", err)
@@ -208,12 +238,13 @@ func (d *Driver) getMachine() (*compute.Instance, error) {
 	return machine, nil
 }
 
-func NewDriver(hostName, storePath string) Driver {
-	return Driver{
-		TritonAccount: defaultTritonAccount,
-		TritonKeyPath: defaultTritonKeyPath,
-		TritonKeyId:   defaultTritonKeyId,
-		TritonUrl:     defaultTritonUrl,
+func NewDriver(hostName, storePath string) *Driver {
+	return &Driver{
+		TritonAccount:     defaultTritonAccount,
+		TritonKeyPath:     defaultTritonKeyPath,
+		TritonKeyMaterial: defaultTritonKeyMaterial,
+		TritonKeyId:       defaultTritonKeyId,
+		TritonUrl:         defaultTritonUrl,
 
 		BaseDriver: &drivers.BaseDriver{
 			MachineName: hostName,
@@ -233,6 +264,18 @@ func (d *Driver) Create() error {
 		return err
 	}
 
+	/* If a base64 encoded private key was supplied rather than a path to a key
+	 * then write the decoded key to a file so that Rancher can use it to
+	 * connect to the node after it's been provisioned
+	 */
+	if d.TritonKeyMaterialDecoded != "" {
+		log.Infof("creating SSH key...")
+
+		if err := d.createSSHKey(); err != nil {
+			return err
+		}
+	}
+
 	input := &compute.CreateInstanceInput{
 		Name:    d.MachineName,
 		Image:   d.TritonImage,
@@ -244,6 +287,38 @@ func (d *Driver) Create() error {
 	}
 
 	d.TritonMachineId = machine.ID
+
+	// assign IPAddress property so that Rancher can SSH to the new instance
+	log.Info("waiting for ip address to become available")
+	if err := mcnutils.WaitFor(d.instanceIpAvailable); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *Driver) createSSHKey() error {
+
+	// set SSHKeyPath because rancher accesses the property directly
+	d.SSHKeyPath = d.GetSSHKeyPath()
+
+	// don't do anything if the key was already written to file
+	if _, err := os.Stat(d.GetSSHKeyPath()); errors.Is(err, os.ErrNotExist) {
+		file, err := os.OpenFile(d.GetSSHKeyPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		if err != nil {
+			return err
+		}
+
+		defer file.Close()
+
+		if _, err := file.Write([]byte(d.TritonKeyMaterialDecoded)); err != nil {
+			return err
+		}
+
+		if _, err := file.WriteString("\n"); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -358,6 +433,19 @@ func (d *Driver) GetIP() (string, error) {
 	return machine.PrimaryIP, nil
 }
 
+func (d *Driver) instanceIpAvailable() bool {
+	ip, err := d.GetIP()
+	if err != nil {
+		log.Debug(err)
+	}
+	if ip != "" {
+		d.IPAddress = ip
+		log.Infof("got the IP Address: %q", d.IPAddress)
+		return true
+	}
+	return false
+}
+
 // GetSSHHostname returns hostname for use with ssh
 func (d *Driver) GetSSHHostname() (string, error) {
 	return d.GetIP()
@@ -379,7 +467,21 @@ func (d *Driver) GetURL() (string, error) {
 }
 
 func (d *Driver) GetSSHKeyPath() string {
-	return d.TritonKeyPath
+	var keyPath = d.SSHKeyPath
+
+	if keyPath != "" {
+		return keyPath
+	}
+
+	if d.TritonKeyMaterialDecoded != "" {
+		keyPath = d.ResolveStorePath(fmt.Sprintf("id_rsa_triton_%s", d.TritonAccount))
+	} else {
+		keyPath = d.TritonKeyPath
+	}
+
+	d.SSHKeyPath = keyPath
+
+	return keyPath
 }
 
 // GetState returns the state that the host is in (running, stopped, etc)
