@@ -35,7 +35,7 @@ var (
 	defaultTritonKeyPath     = "" // os.Getenv("HOME") + "/.ssh/id_rsa"
 	defaultTritonKeyId       = ""
 	defaultTritonKeyMaterial = ""
-	defaultTritonUrl         = "https://us-east-1.api.joyent.com"
+	defaultTritonUrl         = ""
 
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
 	defaultTritonImage   = "debian-8"
