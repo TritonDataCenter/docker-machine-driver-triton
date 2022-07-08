@@ -38,9 +38,10 @@ var (
 	defaultTritonUrl         = ""
 
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
-	defaultTritonImage   = "debian-8"
-	defaultTritonPackage = "k4-highcpu-kvm-250M"
-	defaultSSHUser       = "root"
+	defaultTritonImage       = "debian-8"
+	defaultTritonPackage     = "k4-highcpu-kvm-250M"
+	defaultSSHUser           = "root"
+	defaultTritonTLSInsecure = "false"
 )
 
 type Driver struct {
@@ -53,6 +54,7 @@ type Driver struct {
 	TritonKeyMaterialDecoded string
 	TritonKeyId              string
 	TritonUrl                string
+	TritonTLSInsecure        string
 
 	// machine creation parameters
 	TritonImage   string
@@ -162,6 +164,12 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Usage:  "Triton SSH user",
 			Value:  defaultSSHUser,
 		},
+		mcnflag.StringFlag{
+			EnvVar: envPrefix + "TLS_INSECURE",
+			Name:   flagPrefix + "tls-insecure",
+			Usage:  "Do not validate the CloudAPI SSL certificate",
+			Value:  defaultTritonTLSInsecure,
+		},
 	}
 }
 
@@ -215,7 +223,18 @@ func (d Driver) client() (*compute.ComputeClient, error) {
 		Signers:     []auth.Signer{signer},
 	}
 
-	return compute.NewClient(config)
+	var client *compute.ComputeClient
+	client, err = compute.NewClient(config)
+
+	if err != nil {
+		return nil, fmt.Errorf("error creating ComputeClient: %s", err)
+	}
+
+	if d.TritonTLSInsecure == "true" {
+		client.Client.InsecureSkipTLSVerify()
+	}
+
+	return client, nil
 }
 
 func (d *Driver) getMachine() (*compute.Instance, error) {
@@ -245,6 +264,7 @@ func NewDriver(hostName, storePath string) *Driver {
 		TritonKeyMaterial: defaultTritonKeyMaterial,
 		TritonKeyId:       defaultTritonKeyId,
 		TritonUrl:         defaultTritonUrl,
+		TritonTLSInsecure: defaultTritonTLSInsecure,
 
 		BaseDriver: &drivers.BaseDriver{
 			MachineName: hostName,
