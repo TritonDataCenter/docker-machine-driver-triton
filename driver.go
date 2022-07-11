@@ -90,6 +90,8 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 
 	d.SSHUser = opts.String(flagPrefix + "ssh-user")
 
+	d.TritonTLSInsecure = opts.String(flagPrefix + "tls-insecure")
+
 	d.SetSwarmConfigFromFlags(opts)
 
 	if d.TritonAccount == "" {
@@ -229,6 +231,8 @@ func (d Driver) client() (*compute.ComputeClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating ComputeClient: %s", err)
 	}
+
+	log.Debugf("TritonTLSInsecure=%s", d.TritonTLSInsecure)
 
 	if d.TritonTLSInsecure == "true" {
 		client.Client.InsecureSkipTLSVerify()
