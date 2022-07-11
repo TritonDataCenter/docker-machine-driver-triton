@@ -30,7 +30,7 @@ func (c *ComputeClient) Ping(ctx context.Context) (*PingOutput, error) {
 	}
 	response, err := c.Client.ExecuteRequestRaw(ctx, reqInputs)
 	if response == nil {
-		return nil, fmt.Errorf("Ping request has empty response")
+		return nil, fmt.Errorf("Ping request has empty response: %s", err)
 	}
 	if response.Body != nil {
 		defer response.Body.Close()
