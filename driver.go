@@ -31,11 +31,12 @@ const (
 )
 
 var (
-	defaultTritonAccount     = ""
-	defaultTritonKeyPath     = "" // os.Getenv("HOME") + "/.ssh/id_rsa"
-	defaultTritonKeyId       = ""
-	defaultTritonKeyMaterial = ""
-	defaultTritonUrl         = ""
+	defaultTritonAccount      = ""
+	defaultTritonActAsAccount = ""
+	defaultTritonKeyPath      = "" // os.Getenv("HOME") + "/.ssh/id_rsa"
+	defaultTritonKeyId        = ""
+	defaultTritonKeyMaterial  = ""
+	defaultTritonUrl          = ""
 
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
 	defaultTritonImage       = "debian-8"
@@ -49,6 +50,7 @@ type Driver struct {
 
 	// authentication/access parameters
 	TritonAccount            string
+	TritonActAsAccount       string
 	TritonKeyPath            string
 	TritonKeyMaterial        string
 	TritonKeyMaterialDecoded string
@@ -67,6 +69,7 @@ type Driver struct {
 // SetConfigFromFlags configures the driver with the object that was returned by RegisterCreateFlags
 func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.TritonAccount = opts.String(flagPrefix + "account")
+	d.TritonActAsAccount = opts.String(flagPrefix + "act-as")
 	d.TritonKeyPath = opts.String(flagPrefix + "key-path")
 
 	d.TritonKeyMaterial = opts.String(flagPrefix + "key-material")
@@ -131,6 +134,12 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:   flagPrefix + "account",
 			Usage:  "Login name/username",
 			Value:  defaultTritonAccount,
+		},
+		mcnflag.StringFlag{
+			EnvVar: envPrefix + "ACT_AS",
+			Name:   flagPrefix + "act-as",
+			Usage:  "Masquerade as the given account login name.",
+			Value:  defaultTritonActAsAccount,
 		},
 		mcnflag.StringFlag{
 			EnvVar: envPrefix + "KEY_ID",
@@ -219,9 +228,14 @@ func (d Driver) client() (*compute.ComputeClient, error) {
 		}
 	}
 
+	var authAccount = d.TritonActAsAccount
+	if authAccount == "" {
+		authAccount = d.TritonAccount
+	}
+
 	config := &triton.ClientConfig{
 		TritonURL:   d.TritonUrl,
-		AccountName: d.TritonAccount,
+		AccountName: authAccount,
 		Signers:     []auth.Signer{signer},
 	}
 
@@ -263,12 +277,13 @@ func (d *Driver) getMachine() (*compute.Instance, error) {
 
 func NewDriver(hostName, storePath string) *Driver {
 	return &Driver{
-		TritonAccount:     defaultTritonAccount,
-		TritonKeyPath:     defaultTritonKeyPath,
-		TritonKeyMaterial: defaultTritonKeyMaterial,
-		TritonKeyId:       defaultTritonKeyId,
-		TritonUrl:         defaultTritonUrl,
-		TritonTLSInsecure: defaultTritonTLSInsecure,
+		TritonAccount:      defaultTritonAccount,
+		TritonActAsAccount: defaultTritonActAsAccount,
+		TritonKeyPath:      defaultTritonKeyPath,
+		TritonKeyMaterial:  defaultTritonKeyMaterial,
+		TritonKeyId:        defaultTritonKeyId,
+		TritonUrl:          defaultTritonUrl,
+		TritonTLSInsecure:  defaultTritonTLSInsecure,
 
 		BaseDriver: &drivers.BaseDriver{
 			MachineName: hostName,
