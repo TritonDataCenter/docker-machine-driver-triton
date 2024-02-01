@@ -37,6 +37,7 @@ var (
 	defaultTritonKeyId        = ""
 	defaultTritonKeyMaterial  = ""
 	defaultTritonUrl          = ""
+	defaultTritonTags         = ""
 
 	// https://docs.joyent.com/public-cloud/instances/virtual-machines/images/linux/debian#debian-8
 	defaultTritonImage       = "debian-8"
@@ -56,6 +57,7 @@ type Driver struct {
 	TritonKeyMaterialDecoded string
 	TritonKeyId              string
 	TritonUrl                string
+	TritonTags               string
 	TritonTLSInsecure        string
 
 	// machine creation parameters
@@ -87,6 +89,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 
 	d.TritonKeyId = opts.String(flagPrefix + "key-id")
 	d.TritonUrl = opts.String(flagPrefix + "url")
+	d.TritonTags = opts.String(flagPrefix + "tags")
 
 	d.TritonImage = opts.String(flagPrefix + "image")
 	d.TritonPackage = opts.String(flagPrefix + "package")
@@ -180,6 +183,12 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:   flagPrefix + "tls-insecure",
 			Usage:  "Do not validate the CloudAPI SSL certificate",
 			Value:  defaultTritonTLSInsecure,
+		},
+		mcnflag.StringFlag{
+			EnvVar: envPrefix + "TAGS",
+			Name:   flagPrefix + "tags",
+			Usage:  "Tags assigned to the VM",
+			Value:  defaultTritonTags,
 		},
 	}
 }
@@ -283,6 +292,7 @@ func NewDriver(hostName, storePath string) *Driver {
 		TritonKeyMaterial:  defaultTritonKeyMaterial,
 		TritonKeyId:        defaultTritonKeyId,
 		TritonUrl:          defaultTritonUrl,
+		TritonTags:         defaultTritonTags,
 		TritonTLSInsecure:  defaultTritonTLSInsecure,
 
 		BaseDriver: &drivers.BaseDriver{
@@ -315,10 +325,25 @@ func (d *Driver) Create() error {
 		}
 	}
 
+	// parse out tags into a map
+	var tags map[string]string
+	if d.TritonTags != "" {
+		tags = make(map[string]string)
+		splitTags := strings.Split(d.TritonTags, ",")
+		for _, tagDefinition := range splitTags {
+			definitionSplit := strings.Split(tagDefinition, "=")
+			if len(definitionSplit) == 2 {
+				// remove leading and trailing whitespace from tag key and value
+				tags[strings.TrimSpace(definitionSplit[0])] = strings.TrimSpace(definitionSplit[1])
+			}
+		}
+	}
+
 	input := &compute.CreateInstanceInput{
 		Name:    d.MachineName,
 		Image:   d.TritonImage,
 		Package: d.TritonPackage,
+		Tags:    tags,
 	}
 	machine, err := c.Instances().Create(context.Background(), input)
 	if err != nil {
